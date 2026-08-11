@@ -1,0 +1,118 @@
+# 通用 Web 测试框架 完整演示（Phase B：变量/环境/鉴权/提取关联/数据驱动）
+# 目标站点：postman-echo.com（公开 echo 服务，功能齐全、稳定）
+# 换成自己的网站 = 改 environments.*.baseUrl 与 tests，代码零改动。
+
+# ---- 默认环境（--env prod 可切换）----
+env: test
+environments:
+  test:
+    baseUrl: https://postman-echo.com
+    variables:
+      ENV_TAG: test
+  prod:
+    baseUrl: https://postman-echo.com
+    variables:
+      ENV_TAG: prod
+
+site:
+  name: postman-echo-demo
+  baseUrl: https://postman-echo.com
+  globalHeaders:
+    Accept: application/json
+    User-Agent: web-test-framework/0.2
+  timeouts:
+    connect: 5000
+    read: 15000
+  retry:
+    count: 1
+    backoffMillis: 500
+  variables:
+    ACCOUNT: demo@test.io
+    PASSWORD: demo-pass
+
+# ---- 登录鉴权：先 POST 登录 → 提取 token → 注入 Authorization 头 ----
+# （借用 echo 服务演示"登录→拿 token→带 token 调接口"完整链路：
+#   echo 会原样回显请求体，body 里的 token 字段被提取为变量）
+auth:
+  type: login
+  login:
+    method: POST
+    path: /post
+    contentType: json
+    body:
+      username: "${variables.ACCOUNT}"
+      password: "${variables.PASSWORD}"
+      token: "tok-demo-001"
+    extract:
+      - { name: token, type: jsonpath, expr: "$.json.token" }
+  injectHeader:
+    Authorization: "Bearer ${token}"
+  retryOn401: true
+
+tests:
+  # 验证注入的鉴权头确实到达了服务端（echo 回显请求头）
+  - name: get-with-auth
+    method: GET
+    path: /get
+    asserts:
+      - { type: status, expected: 200 }
+      - { type: jsonpath, expr: "$.headers.authorization", contains: "Bearer tok-demo-001" }
+
+  # 环境变量流入请求体与断言期望值
+  - name: env-tag-echo
+    method: POST
+    path: /post
+    contentType: json
+    body:
+      env: "${variables.ENV_TAG}"
+    asserts:
+      - { type: status, expected: 200 }
+      - { type: jsonpath, expr: "$.json.env", equals: "${variables.ENV_TAG}" }
+
+  # 内置函数：随机 UUID / 时间戳
+  - name: uuid-order
+    method: POST
+    path: /post
+    contentType: json
+    body:
+      orderId: "${random.uuid}"
+      createdAt: "${timestamp.iso}"
+    asserts:
+      - { type: status, expected: 200 }
+      - { type: jsonpath, expr: "$.json.orderId", notEmpty: true }
+      - { type: jsonpath, expr: "$.json.createdAt", notEmpty: true }
+
+  # 基础功能：query 参数 + JSONPath + 响应头 + 响应时间
+  - name: get-with-query
+    method: GET
+    path: /get
+    query:
+      a: "1"
+      b: hello
+    asserts:
+      - { type: status, expected: 200 }
+      - { type: jsonpath, expr: "$.args.a", equals: "1" }
+      - { type: jsonpath, expr: "$.args.b", equals: "hello" }
+      - { type: header, name: Content-Type, contains: "application/json" }
+      - { type: rtMs, max: 15000 }
+
+  # 数据驱动引用的用例：itemName/itemQty 由 CSV 每行绑定
+  - name: create-item
+    method: POST
+    path: /post
+    contentType: json
+    body:
+      item: "${itemName}"
+      qty: "${itemQty}"
+    asserts:
+      - { type: status, expected: 200 }
+      - { type: jsonpath, expr: "$.json.item", equals: "${itemName}" }
+      - { type: jsonpath, expr: "$.json.qty", equals: "${itemQty}" }
+
+# ---- 数据驱动：CSV 每行跑一次 create-item ----
+dataSets:
+  - test: create-item
+    file: data/items.csv
+    bind:
+      - { name: itemName, column: itemName }
+      - { name: itemQty, column: itemQty }
