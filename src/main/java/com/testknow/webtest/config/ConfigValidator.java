@@ -3,6 +3,8 @@ package com.testknow.webtest.config;
 import com.testknow.webtest.assertion.AssertionRegistry;
 import com.testknow.webtest.config.model.AuthConfig;
 import com.testknow.webtest.config.model.DataSetConfig;
+import com.testknow.webtest.config.model.PerfConfig;
+import com.testknow.webtest.config.model.PerfScenarioConfig;
 import com.testknow.webtest.config.model.ProjectConfig;
 import com.testknow.webtest.config.model.TestCaseConfig;
 import com.testknow.webtest.core.extract.ExtractorRegistry;
@@ -43,6 +45,7 @@ public class ConfigValidator {
         validateTests(config);
         validateAuth(config);
         validateDataSets(config);
+        validatePerformance(config);
     }
 
     private void validateSite(ProjectConfig config) {
@@ -153,6 +156,51 @@ public class ConfigValidator {
                 }
             }
             default -> {
+            }
+        }
+    }
+
+    private void validatePerformance(ProjectConfig config) {
+        List<PerfConfig> list = config.getPerformance();
+        if (list == null || list.isEmpty()) {
+            return;
+        }
+        Set<String> testNames = new HashSet<>();
+        for (TestCaseConfig t : config.getTests()) {
+            testNames.add(t.getName());
+        }
+        for (int i = 0; i < list.size(); i++) {
+            PerfConfig perf = list.get(i);
+            String label = "performance[" + i + "]";
+            if (perf.getName() == null || perf.getName().isBlank()) {
+                throw new ConfigError(label + " 缺少 name");
+            }
+            boolean hasDuration = perf.usesDuration();
+            boolean hasIterations = perf.getIterations() != null && perf.getIterations() > 0;
+            if (!hasDuration && !hasIterations) {
+                throw new ConfigError(label + " ('" + perf.getName() + "') 需要 durationSec 或 iterations 之一");
+            }
+            if (hasDuration && hasIterations) {
+                throw new ConfigError(label + " ('" + perf.getName() + "') 的 durationSec 与 iterations 互斥，只能选其一");
+            }
+            if (perf.getScenarios() == null || perf.getScenarios().isEmpty()) {
+                throw new ConfigError(label + " ('" + perf.getName() + "') 缺少 scenarios");
+            }
+            for (int j = 0; j < perf.getScenarios().size(); j++) {
+                PerfScenarioConfig sc = perf.getScenarios().get(j);
+                String sLabel = label + ".scenarios[" + j + "]";
+                if (sc.getRef() == null || sc.getRef().isBlank()) {
+                    throw new ConfigError(sLabel + " 缺少 ref（引用用例名）");
+                }
+                if (!testNames.contains(sc.getRef())) {
+                    throw new ConfigError(sLabel + " 引用的用例不存在: " + sc.getRef());
+                }
+                if (sc.getUsers() <= 0) {
+                    throw new ConfigError(sLabel + " 的 users 必须 > 0");
+                }
+                if (sc.getRampUpSec() < 0) {
+                    throw new ConfigError(sLabel + " 的 rampUpSec 不能为负");
+                }
             }
         }
     }

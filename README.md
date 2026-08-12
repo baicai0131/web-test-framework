@@ -5,7 +5,7 @@
 配置驱动的**通用 Web 测试框架**。读一份 YAML 配置文件即可对任意网站执行功能测试——
 **换被测网站只需改配置，代码零改动**。
 
-已支持：功能测试 · 变量插值 · 环境切换 · 登录鉴权（token 关联）· 数据驱动 CSV。
+已支持：功能测试 · 变量插值 · 环境切换 · 登录鉴权（token 关联）· 数据驱动 CSV · **性能测试**（并发压测 / TPS / 响应时间分位 / 阈值门禁）。
 
 ## 快速开始
 
@@ -17,8 +17,11 @@ mvn -DskipTests package
 # 2. 对 postman-echo.com 跑完整演示（登录→拿token→带token调接口 + 数据驱动）
 java -jar target/webtest.jar run -c config/demo.yaml
 
-# 3. 结果输出
-#    控制台汇总 + target/reports/result.json
+# 3. 性能测试（并发压测 → TPS/响应时间分位 → 阈值门禁）
+java -jar target/webtest.jar perf -c config/demo.yaml
+
+# 4. 结果输出
+#    控制台汇总 + target/reports/result.json + target/reports/perf-result.json
 ```
 
 ### 用自己的网站
@@ -43,7 +46,8 @@ tests:
 ## CLI 用法
 
 ```
-webtest run -c <config.yaml> [-o <输出目录>] [-e <环境名>]
+webtest run  -c <config.yaml> [-o <输出目录>] [-e <环境名>]      # 功能测试
+webtest perf -c <config.yaml> [-o <输出目录>] [-e <环境名>] [-p <性能计划名>]   # 性能测试
 ```
 
 | 参数 | 说明 | 默认 |
@@ -51,6 +55,7 @@ webtest run -c <config.yaml> [-o <输出目录>] [-e <环境名>]
 | `-c, --config` | 配置文件路径（必填） | — |
 | `-o, --output-dir` | 结果输出目录 | `target/reports` |
 | `-e, --env` | 选择环境（覆盖配置中的 `env`） | 配置的 `env` |
+| `-p, --perf`（仅 perf） | 只运行指定名称的性能计划 | 运行全部 |
 
 ## 退出码契约（CI 门禁）
 
@@ -186,38 +191,64 @@ dataSets:
 
 CSV 首行为表头，支持引号包裹（`"banana,large"`）与 `""` 转义。
 
+### 性能测试（performance）
+
+```yaml
+performance:
+  - name: echo-smoke              # 性能计划名（-p 按名选择）
+    durationSec: 30               # 停止条件：时长（秒）
+    # iterations: 100             # 或：每个用户迭代次数（与 durationSec 互斥）
+    scenarios:
+      - ref: get-with-query       # 引用 tests 中已定义的用例
+        users: 20                 # 并发虚拟用户数
+        rampUpSec: 2              # 线性 ramp-up 到全部用户的时间（秒，0=瞬时）
+        thinkTimeMs: 100          # 每次迭代后的思考时间（毫秒）
+    thresholds:                   # 阈值门禁：任一不满足 → 退出码 2
+      errorRateMaxPct: 2          # 错误率上限（%）
+      p95MsMax: 500               # P95 响应时间上限（毫秒）
+      tpsMin: 100                 # TPS 下限
+```
+
+- 线程模型：Java 21 **虚拟线程**承载每个虚拟用户；登录鉴权（`auth.login`）时每个用户**独立登录**拿到自己的 token
+- 指标：每秒时间序列（TPS / 平均 RT / P95 / 错误率）+ 聚合（P50/P90/P95/P99/P999）
+- 输出：控制台汇总 + `target/reports/perf-result.json`（含时间序列）
+
 ## 项目结构
 
 ```
 src/main/java/com/testknow/webtest/
 ├── Main.java            CLI 入口
-├── cli/                 run 命令 + 退出码契约
-├── config/              YAML 模型 / 加载 / 校验（含环境/鉴权/数据驱动）
+├── cli/                 run / perf 命令 + 退出码契约
+├── config/              YAML 模型 / 加载 / 校验（含环境/鉴权/数据驱动/性能）
 ├── core/
 │   ├── Variables.java           不可变作用域变量链
 │   ├── PlaceholderResolver.java 占位符插值引擎
+│   ├── TestRuntime.java         环境解析 + 生效站点 + 根变量（功能/性能共用）
 │   ├── extract/                 变量提取器 SPI + jsonpath/regex/header/body
-│   ├── auth/                    AuthManager（登录/静态鉴权/401 重登）
+│   ├── auth/                    AuthManager（登录/静态鉴权/401 重登/AuthSession）
 │   ├── dataset/                 CSV 读取 + 数据驱动执行
 │   ├── CaseExecutor / TestRunner
 │   └── result/                  结果模型
 ├── http/                OkHttp 封装（超时/重试/日志/鉴权头注入）
 ├── assertion/           断言 SPI + 5 内置断言
-└── report/              result.json 输出 + 控制台汇总
+├── perf/                性能引擎
+│   ├── LoadGenerator / Worker   虚拟线程并发 + per-VU 会话
+│   ├── metrics/                 HdrHistogram + 滑动窗口 TPS + 时间序列
+│   └── ThresholdVerifier        阈值门禁
+└── report/              功能/性能结果输出 + 控制台汇总
 ```
 
 ## 开发
 
 ```bash
-mvn test          # 51 个自测（WireMock 本地 mock 后端）
+mvn test          # 60 个自测（WireMock 本地 mock 后端）
 ```
 
 ## 路线图（后续阶段）
 
-- **Phase C**：断言/提取插件 SPI（ServiceLoader）、HTML 报告（带图表）
-- **Phase D**：性能引擎（并发 / TPS / P50/P95/P99 / 阈值门禁）
-- **Phase E**：稳定性压测 + 安全检查
-- **Phase F**：CI 集成、离线报告回放、多站点配置
+- **Phase C**：断言/提取插件 SPI（ServiceLoader）、HTML 报告（带曲线图）
+- **Phase E**：稳定性压测（长时间 + 资源泄漏哨兵）、安全检查
+- **Phase F**：离线报告回放、多站点配置、更丰富的 ramp-up / 场景调度
 
 ## 环境要求
 

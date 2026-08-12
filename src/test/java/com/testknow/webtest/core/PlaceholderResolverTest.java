@@ -57,6 +57,6 @@ class PlaceholderResolverTest {
         // 配置变量自引用：TestRunner.resolveVariables 负责检测
         org.junit.jupiter.api.Assertions.assertThrows(
                 com.testknow.webtest.config.ConfigError.class,
-                () -> TestRunner.resolveVariables(Map.of("A", "${variables.A}")));
+                () -> TestRuntime.resolveVariables(Map.of("A", "${variables.A}")));
     }
 }

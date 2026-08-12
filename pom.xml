@@ -54,6 +54,13 @@
             <version>${picocli.version}</version>
         </dependency>
 
+        <!-- 性能直方图（P50/P95/P99 统计） -->
+        <dependency>
+            <groupId>org.hdrhistogram</groupId>
+            <artifactId>HdrHistogram</artifactId>
+            <version>2.2.2</version>
+        </dependency>
+
         <!-- 日志 -->
         <dependency>
             <groupId>org.slf4j</groupId>

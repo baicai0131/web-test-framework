@@ -116,3 +116,31 @@ dataSets:
     bind:
       - { name: itemName, column: itemName }
       - { name: itemQty, column: itemQty }
+
+# ---- 性能测试（webtest perf -c config/demo.yaml）----
+# 对 postman-echo.com 做短压测演示；真实压测请先改到自己的测试环境，
+# 并调大 durationSec。场景 ref 引用 tests 中已定义的用例。
+# 注意：公网免费服务在高并发下会返回 429/5xx（限流），故 demo 阈值放宽；
+#      真实站点压测应按业务 SLA 设定严格阈值。
+performance:
+  - name: echo-smoke
+    durationSec: 5
+    scenarios:
+      - ref: get-with-query
+        users: 10
+        rampUpSec: 2
+        thinkTimeMs: 100
+    thresholds:
+      errorRateMaxPct: 30
+      p95MsMax: 5000
+      tpsMin: 5
+
+  - name: echo-mixed
+    durationSec: 5
+    scenarios:
+      - { ref: get-with-query, users: 8,  rampUpSec: 2, thinkTimeMs: 100 }
+      - { ref: env-tag-echo,   users: 6,  rampUpSec: 2, thinkTimeMs: 200 }
+      - { ref: uuid-order,     users: 4,  rampUpSec: 2, thinkTimeMs: 300 }
+    thresholds:
+      errorRateMaxPct: 30
+      p95MsMax: 8000

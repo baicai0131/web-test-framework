@@ -84,29 +84,12 @@ public class AuthManager {
 
     /**
      * 初始化鉴权（登录/静态头）。返回登录流程的用例结果（静态类型返回 null）。
+     * 结果（提取的变量）存入全局 headers，供功能测试使用。
      */
     public CaseResult login() {
-        if (!isEnabled()) {
-            return null;
-        }
-        return switch (auth.getType().toLowerCase()) {
-            case "bearertoken" -> {
-                String token = resolver.resolve(auth.getToken(), baseVars);
-                headers = Map.of("Authorization", "Bearer " + token);
-                yield null;
-            }
-            case "basic" -> {
-                String user = resolver.resolve(auth.getUsername(), baseVars);
-                String pass = resolver.resolve(auth.getPassword(), baseVars);
-                String cred = user + ":" + pass;
-                headers = Map.of("Authorization", "Basic "
-                        + Base64.getEncoder().encodeToString(cred.getBytes(StandardCharsets.UTF_8)));
-                yield null;
-            }
-            case "login" -> doLogin();
-            default -> throw new ConfigError("不支持的 auth.type: '" + auth.getType()
-                    + "'，可选: none | bearerToken | basic | login");
-        };
+        AuthSession session = createSession();
+        headers = session.headers();
+        return session.extractedCaseResult();
     }
 
     /**
@@ -116,10 +99,36 @@ public class AuthManager {
         if (!isEnabled() || !"login".equalsIgnoreCase(auth.getType())) {
             return;
         }
-        doLogin();
+        headers = createSession().headers();
     }
 
-    private CaseResult doLogin() {
+    /**
+     * 创建一次独立的鉴权会话（静态类型共享静态头；login 类型每个会话独立登录）。
+     * 性能测试中每个虚拟用户调用一次，获得自己的 token，互不干扰。
+     */
+    public AuthSession createSession() {
+        if (!isEnabled()) {
+            return AuthSession.NONE;
+        }
+        return switch (auth.getType().toLowerCase()) {
+            case "bearertoken" -> {
+                String token = resolver.resolve(auth.getToken(), baseVars);
+                yield new AuthSession(Map.of("Authorization", "Bearer " + token), baseVars, null);
+            }
+            case "basic" -> {
+                String user = resolver.resolve(auth.getUsername(), baseVars);
+                String pass = resolver.resolve(auth.getPassword(), baseVars);
+                String cred = user + ":" + pass;
+                yield new AuthSession(Map.of("Authorization", "Basic "
+                        + Base64.getEncoder().encodeToString(cred.getBytes(StandardCharsets.UTF_8))), baseVars, null);
+            }
+            case "login" -> doLoginSession();
+            default -> throw new ConfigError("不支持的 auth.type: '" + auth.getType()
+                    + "'，可选: none | bearerToken | basic | login");
+        };
+    }
+
+    private AuthSession doLoginSession() {
         TestCaseConfig login = auth.getLogin();
         if (login == null) {
             throw new ConfigError("auth.type=login 需要配置 auth.login");
@@ -140,17 +149,15 @@ public class AuthManager {
 
             Map<String, String> h = new LinkedHashMap<>();
             auth.getInjectHeader().forEach((k, v) -> h.put(k, resolver.resolve(v, authVars)));
-            headers = h;
 
-            log.info("登录成功: {} {} → {} (提取变量: {})",
-                    login.getMethod(), login.getPath(), resp.code(), extracted.keySet());
-            return new CaseResult("auth.login", login.getMethod(), login.getPath(),
+            CaseResult loginResult = new CaseResult("auth.login", login.getMethod(), login.getPath(),
                     resp.code(), resp.elapsedNanos(), failures, null, extracted);
+            return new AuthSession(h, authVars, loginResult);
         } catch (IOException e) {
-            headers = Map.of();
             log.error("登录失败(网络): {} {}", login.getMethod(), login.getPath(), e);
-            return new CaseResult("auth.login", login.getMethod(), login.getPath(),
-                    null, 0, List.of(), "登录失败(网络): " + e.getMessage(), Map.of());
+            return new AuthSession(Map.of(), baseVars,
+                    new CaseResult("auth.login", login.getMethod(), login.getPath(),
+                            null, 0, List.of(), "登录失败(网络): " + e.getMessage(), Map.of()));
         }
     }
 }

@@ -19,6 +19,7 @@ public class ProjectConfig {
     private Map<String, EnvironmentConfig> environments = new LinkedHashMap<>();
     private AuthConfig auth = new AuthConfig();
     private List<DataSetConfig> dataSets = new ArrayList<>();
+    private List<PerfConfig> performance = new ArrayList<>();
 
     public SiteConfig getSite() {
         return site;
@@ -66,5 +67,13 @@ public class ProjectConfig {
 
     public void setDataSets(List<DataSetConfig> dataSets) {
         this.dataSets = dataSets;
+    }
+
+    public List<PerfConfig> getPerformance() {
+        return performance;
+    }
+
+    public void setPerformance(List<PerfConfig> performance) {
+        this.performance = performance;
     }
 }

@@ -49,8 +49,8 @@ public class CaseExecutor {
      * @param auth 鉴权管理器（可空）；负责注入鉴权头与 401 重登
      */
     public CaseResult execute(TestCaseConfig tc, Variables vars, AuthManager auth) {
+        Map<String, String> authHeaders = authHeadersFor(tc, auth);
         try {
-            Map<String, String> authHeaders = authHeadersFor(tc, auth);
             Request request = requestBuilder.build(tc, vars, authHeaders);
             ResponseEnvelope resp = caller.execute(request);
 
@@ -60,17 +60,37 @@ public class CaseExecutor {
                 request = requestBuilder.build(tc, vars, authHeadersFor(tc, auth));
                 resp = caller.execute(request);
             }
-
-            List<AssertionFailure> failures = evaluate(tc, resp, vars);
-
-            Map<String, String> extracted = Extractors.extract(tc.getExtract(), resp, vars, extractors);
-            return new CaseResult(tc.getName(), tc.getMethod(), tc.getPath(),
-                    resp.code(), resp.elapsedNanos(), failures, null, extracted);
+            return finish(tc, resp, vars);
         } catch (IOException e) {
             log.error("请求失败 [{}]: {}", tc.getName(), e.getMessage());
             return new CaseResult(tc.getName(), tc.getMethod(), tc.getPath(),
                     null, 0, List.of(), "网络错误: " + e.getMessage(), Map.of());
         }
+    }
+
+    /**
+     * 执行单个用例（显式鉴权头，性能测试 per-VU 会话用）。
+     * 不触发 401 重登（压测场景由 worker 自行管理会话）。
+     */
+    public CaseResult execute(TestCaseConfig tc, Variables vars, Map<String, String> authHeaders,
+                              AuthManager auth) {
+        try {
+            Request request = requestBuilder.build(tc, vars, authHeaders);
+            ResponseEnvelope resp = caller.execute(request);
+            return finish(tc, resp, vars);
+        } catch (IOException e) {
+            log.error("请求失败 [{}]: {}", tc.getName(), e.getMessage());
+            return new CaseResult(tc.getName(), tc.getMethod(), tc.getPath(),
+                    null, 0, List.of(), "网络错误: " + e.getMessage(), Map.of());
+        }
+    }
+
+    /** 断言 + 提取，产出用例结果。 */
+    private CaseResult finish(TestCaseConfig tc, ResponseEnvelope resp, Variables vars) {
+        List<AssertionFailure> failures = evaluate(tc, resp, vars);
+        Map<String, String> extracted = Extractors.extract(tc.getExtract(), resp, vars, extractors);
+        return new CaseResult(tc.getName(), tc.getMethod(), tc.getPath(),
+                resp.code(), resp.elapsedNanos(), failures, null, extracted);
     }
 
     private List<AssertionFailure> evaluate(TestCaseConfig tc, ResponseEnvelope resp, Variables vars) {
