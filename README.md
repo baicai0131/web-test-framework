@@ -1,5 +1,7 @@
 # web-test-framework
 
+[![CI](https://github.com/baicai0131/web-test-framework/actions/workflows/ci.yml/badge.svg)](https://github.com/baicai0131/web-test-framework/actions/workflows/ci.yml)
+
 配置驱动的**通用 Web 测试框架**。读一份 YAML 配置文件即可对任意网站执行功能测试——
 **换被测网站只需改配置，代码零改动**。
 
